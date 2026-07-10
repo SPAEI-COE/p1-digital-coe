@@ -1066,8 +1066,9 @@ var Nav = {
 };
 
 // ── STAT CARD ─────────────────────────────────────────
-function statCard(ico, lbl, val, cor, sub){
-  return '<div class="stat-card"><div class="stat-ico" style="background:'+cor+'22"><span style="font-size:20px">'+ico+'</span></div>'
+function statCard(ico, lbl, val, cor, sub, sitKey){
+  var extra = sitKey ? ' onclick="Render._abrirCardSit(\''+sitKey+'\')" style="cursor:pointer;user-select:none;transition:transform .1s" onmouseenter="this.style.transform=\'scale(1.03)\'" onmouseleave="this.style.transform=\'\'"' : '';
+  return '<div class="stat-card"'+extra+'><div class="stat-ico" style="background:'+cor+'22"><span style="font-size:20px">'+ico+'</span></div>'
     +'<div><div class="stat-val" style="color:'+cor+'">'+val+'</div>'
     +'<div class="stat-lbl">'+esc(lbl)+'</div>'
     +(sub?'<div class="stat-sub">'+esc(sub)+'</div>':'')
@@ -1132,12 +1133,12 @@ var Render = {
       +'<div class="bv-sub">'+esc(dataFmt)+'</div></div>';
     html += '<div class="stat-grid">';
     html += statCard('&#128101;','Efetivo Total',ef.length,'#0F2D5F',ef.filter(function(e){return !e.adido;}).length+' org / '+ef.filter(function(e){return e.adido;}).length+' adidos');
-    html += statCard('&#9989;','Em Servico',cnt.SERVICO,'#065F46','');
-    html += statCard('&#9199;&#65039;','Folga',cnt.FOLGA,'#9B1C1C','');
-    html += statCard('&#128309;','Dispensa',cnt.DISPENSA,'#1D4ED8','');
-    html += statCard('&#127958;&#65039;','Ferias',cnt.FERIAS,'#6B21A8','');
-    html += statCard('&#127973;','LTS',cnt.LTS,'#065F46','');
-    html += statCard('&#128998;','Sobreaviso',cnt.SOBREAVISO,'#92400E','');
+    html += statCard('&#9989;','Em Servico',cnt.SERVICO,'#065F46','','SERVICO');
+    html += statCard('&#9199;&#65039;','Folga',cnt.FOLGA,'#9B1C1C','','FOLGA');
+    html += statCard('&#128309;','Dispensa',cnt.DISPENSA,'#1D4ED8','','DISPENSA');
+    html += statCard('&#127958;&#65039;','Ferias',cnt.FERIAS,'#6B21A8','','FERIAS');
+    html += statCard('&#127973;','LTS',cnt.LTS,'#065F46','','LTS');
+    html += statCard('&#128998;','Sobreaviso',cnt.SOBREAVISO,'#92400E','','SOBREAVISO');
     html += statCard('&#128276;','Comunicados',nl,'#9B1C1C','Nao lidos');
     html += '</div>';
     html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">';
@@ -1221,7 +1222,29 @@ var Render = {
       return;
     }
 
-    // ADMIN
+    // ADMIN — painel pessoal do admin
+    var admSt = allSt[u.rg] || Array(7).fill('SERVICO');
+    var admEnviou = Escala.isEnviado(u.rg);
+    var admPodeEditar = !prazo;
+    var admPanelHtml = '<div class="card" style="max-width:700px;margin-bottom:18px;border:2px solid var(--az)">'
+      +'<div style="font-weight:800;font-size:14px;margin-bottom:10px;color:var(--az)">&#128274; Minha Escala Pessoal &mdash; '+esc(u.posto.split(' ')[0])+' '+esc(u.nome.split(' ')[0])+'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:12px">';
+    DIAS.forEach(function(d,i){
+      var st = admSt[i] || 'SERVICO';
+      var s = SITUACOES[st] || {cor:'#374151', label:st};
+      admPanelHtml += '<div style="text-align:center;padding:8px 4px;border-radius:10px;border:2px solid '+(d.hoje?'rgba(201,150,10,.5)':'var(--border)')+';background:'+(d.hoje?'rgba(201,150,10,.05)':'var(--hover)')+'\">'
+        +'<div style="font-size:9px;font-weight:700;color:var(--muted)">'+d.lbl+'</div>'
+        +'<div style="font-size:12px;font-weight:800;color:var(--text);margin:3px 0">'+d.dt+'</div>'
+        +'<span class="pill-sit" style="background:'+s.cor+';font-size:9px;cursor:'+(admPodeEditar?'pointer':'default')+'"'
+        +(admPodeEditar?' onclick="Render._toggleAdmin('+i+')"':'')+'>'+esc(s.label)+'</span>'
+        +'</div>';
+    });
+    admPanelHtml += '</div><div style="display:flex;gap:8px;align-items:center">'
+      +(admPodeEditar?'<button class="btn btn-primary btn-sm" onclick="Render._confirmarAdmin()">Confirmar Minha Escala</button>':'')
+      +(admEnviou?'<span class="chip chip-gold">CONFIRMADO</span>':'')
+      +'</div></div>';
+
+    // ADMIN — tabela geral
     var search = (DB.get('escSearch')||'').toLowerCase();
     var filtroFuncao = DB.get('filtroFuncao')||'';
     var lista = ef.filter(function(m){
@@ -1244,6 +1267,8 @@ var Render = {
       +'<button class="btn btn-primary btn-sm" onclick="_escOffset=1;Render.folgas()">Proxima Semana</button>'
       +'<button class="btn btn-gold btn-sm" onclick="Render._exportarEscala()">Exportar CSV</button>'
       +'</div></div>';
+
+    html += admPanelHtml;
 
     // Filtros
     html += '<div class="filters">'
@@ -1286,8 +1311,11 @@ var Render = {
     lista.forEach(function(m){
       var st = allSt[m.rg] || Array(7).fill('SERVICO');
       var env = Escala.isEnviado(m.rg);
-      html += '<tr><td><div style="font-size:10px;color:var(--muted)">'+esc(m.posto)+' &mdash; '+esc(m.rg)+'</div>'
-        +'<div style="font-weight:700">'+esc(m.nome)+(m.adido?' <span class="chip chip-gold">ADI</span>':'')+'</div>'
+      var isCMT = m.funcao==='CMT'||m.funcao==='SUBCMT';
+      html += '<tr style="'+(isCMT?'background:rgba(27,58,107,.07);outline:2px solid #1B3A6B;outline-offset:-2px;':'')+'">'
+        +'<td style="'+(isCMT?'border-left:4px solid #1B3A6B;':'')+'">'
+        +'<div style="font-size:10px;color:var(--muted)">'+esc(m.posto)+' &mdash; '+esc(m.rg)+'</div>'
+        +'<div style="font-weight:700">'+esc(m.nome)+(m.adido?' <span class="chip chip-gold">ADI</span>':'')+(isCMT?' <span class="chip" style="background:#1B3A6B;color:#fff;font-size:9px">'+esc(m.funcao)+'</span>':'')+'</div>'
         +'<div style="font-size:10px;color:var(--muted)">'+esc(m.funcao)+'</div></td>';
       st.slice(0,7).forEach(function(s,i){
         var cfg = SITUACOES[s] || {cor:'#374151', label:s};
@@ -1312,6 +1340,21 @@ var Render = {
     if(!confirm('Confirmar sua marcacao? Apos confirmar nao sera possivel alterar.')) return;
     Escala.marcarEnviado(Auth.user.rg);
     toast('Marcacao confirmada!', 'success');
+    this.folgas();
+  },
+  _toggleAdmin: function(idx){
+    var rg = Auth.user.rg;
+    var st = Escala.getSemana(rg);
+    var atual = st[idx] || 'SERVICO';
+    var ops = ['SERVICO','FOLGA','DISPENSA'];
+    var nxt = ops[(ops.indexOf(atual)+1)%ops.length];
+    Escala.setSit(rg, idx, nxt);
+    this.folgas();
+  },
+  _confirmarAdmin: function(){
+    if(!confirm('Confirmar sua marcacao pessoal de escala?')) return;
+    Escala.marcarEnviado(Auth.user.rg);
+    toast('Sua escala confirmada!', 'success');
     this.folgas();
   },
   _abrirSit: function(rg, diaIdx, evt){
@@ -1350,6 +1393,30 @@ var Render = {
     var a = document.createElement('a');
     a.href=url; a.download='escala_coe_'+new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')+'.csv'; a.click();
     toast('Exportacao concluida!', 'success');
+  },
+
+  _abrirCardSit: function(sit){
+    var ef = DB.get('efetivo') || [];
+    var s = SITUACOES[sit] || {cor:'#374151', label:sit};
+    var lista = ef.filter(function(m){ return normSit(m.situacaoAtual||'SERVICO')===sit; });
+    var html = '<div style="background:'+s.cor+';color:#fff;margin:-20px -20px 16px;padding:16px 20px;border-radius:12px 12px 0 0;font-size:16px;font-weight:800">'
+      +esc(s.label)+' &mdash; '+lista.length+' militar'+(lista.length!==1?'es':'')
+      +'</div><button class="modal-close" onclick="Modal.close()">&#x2715;</button>';
+    if(!lista.length){
+      html += '<div style="text-align:center;padding:30px;color:var(--muted);font-size:14px">Nenhum militar nesta situacao</div>';
+    } else {
+      html += '<div class="tbl-wrap" style="max-height:55vh;overflow-y:auto"><table><thead><tr><th>RG</th><th>NOME</th><th>POSTO</th><th>FUNCAO</th></tr></thead><tbody>';
+      lista.forEach(function(m){
+        var isCMT = m.funcao==='CMT';
+        html += '<tr'+(isCMT?' style="background:rgba(27,58,107,.08)"':'')+'>''<td style="font-family:monospace;font-size:11px">'+esc(m.rg)+'</td>'
+          +'<td style="font-weight:700">'+esc(m.nome)+(isCMT?' <span class="chip" style="background:#1B3A6B;color:#fff">CMT</span>':'')+'</td>'
+          +'<td style="font-size:11px">'+esc(m.posto)+'</td>'
+          +'<td style="font-size:11px;color:var(--muted)">'+esc(m.funcao)+'</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    document.getElementById('modal-content').innerHTML = html;
+    Modal.open();
   },
 
   // SITUAÇÕES OPERACIONAIS
@@ -1391,8 +1458,11 @@ var Render = {
     lista.forEach(function(m){
       var sit = normSit(m.situacaoAtual||'SERVICO');
       var s = SITUACOES[sit] || {cor:'#374151', label:sit};
-      html += '<tr><td><div style="font-size:10px;color:var(--muted)">'+esc(m.posto)+' &middot; RG '+esc(m.rg)+'</div>'
-        +'<div style="font-weight:700">'+esc(m.nome)+(m.adido?' <span class="chip chip-gold">ADI</span>':'')+'</div></td>'
+      var isCMT = m.funcao==='CMT'||m.funcao==='SUBCMT';
+      html += '<tr style="'+(isCMT?'background:rgba(27,58,107,.07);':'')+'">'
+        +'<td style="'+(isCMT?'border-left:4px solid #1B3A6B;':'')+'">'
+        +'<div style="font-size:10px;color:var(--muted)">'+esc(m.posto)+' &middot; RG '+esc(m.rg)+'</div>'
+        +'<div style="font-weight:700">'+esc(m.nome)+(m.adido?' <span class="chip chip-gold">ADI</span>':'')+(isCMT?' <span class="chip" style="background:#1B3A6B;color:#fff;font-size:9px">'+esc(m.funcao)+'</span>':'')+'</div></td>'
         +'<td style="font-size:11px;color:var(--muted)">'+esc(m.funcao)+'</td>'
         +'<td><span class="pill-sit" style="background:'+s.cor+'">'+esc(s.label)+'</span></td>';
       if(u.admin){
@@ -1571,17 +1641,93 @@ var Render = {
   admin: function(){
     if(!Auth.user.admin) return;
     var tab=DB.get('adminTab')||'efetivo';
+    var aus = DB.get('ausencias') || [];
+    var hoje = new Date(); hoje.setHours(0,0,0,0);
+    var ausAlertas = aus.filter(function(a){ var d=(new Date(a.fim)-hoje)/86400000; return d>=0&&d<=3; }).length;
     document.getElementById('s-admin').innerHTML=
       '<div class="sec-title" style="margin-bottom:14px">Painel Administrativo</div>'
       +'<div class="admin-tabs">'
-      +['efetivo','configuracoes','logs'].map(function(t){
-        return '<button class="admin-tab'+(tab===t?' active':'')+'" onclick="DB.set(\'adminTab\',\''+t+'\');Render.admin()">'
-          +{efetivo:'Efetivo',configuracoes:'Configuracoes',logs:'Logs'}[t]+'</button>';
+      +['efetivo','ausencias','configuracoes','logs'].map(function(t){
+        var labels={efetivo:'Efetivo',ausencias:'Ausencias'+(ausAlertas&&t==='ausencias'?' <span style="background:#D97706;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px">'+ausAlertas+'</span>':''),configuracoes:'Configuracoes',logs:'Logs'};
+        return '<button class="admin-tab'+(tab===t?' active':'')+'" onclick="DB.set(\'adminTab\',\''+t+'\');Render.admin()">'+labels[t]+'</button>';
       }).join('')+'</div><div id="adm-c"></div>';
     if(tab==='efetivo') this._admEf();
+    else if(tab==='ausencias') this._admAus();
     else if(tab==='configuracoes') this._admCfg();
     else this._admLogs();
   },
+  _admAus: function(){
+    var ef = DB.get('efetivo') || [];
+    var aus = DB.get('ausencias') || [];
+    var hoje = new Date(); hoje.setHours(0,0,0,0);
+    var alertas = aus.filter(function(a){ var d=(new Date(a.fim)-hoje)/86400000; return d>=0&&d<=3; });
+    var html = '';
+    if(alertas.length){
+      html += '<div class="info-box" style="background:#FEF3C7;border-color:#D97706;color:#92400E;margin-bottom:14px">';
+      html += '<strong>&#9888; Vencimento em ate 3 dias:</strong> ';
+      html += alertas.map(function(a){ return esc(a.nome.split(' ')[0])+' ('+esc(a.tipo)+', ate '+esc(a.fim)+')'; }).join(' &middot; ');
+      html += '</div>';
+    }
+    html += '<div class="card" style="max-width:620px;margin-bottom:16px">'
+      +'<div style="font-weight:800;font-size:14px;margin-bottom:12px">&#128197; Registrar Ausencia</div>'
+      +'<div class="form-row">'
+      +'<div class="form-group"><label class="form-label">MILITAR</label>'
+      +'<select id="aus-rg" class="form-ctrl">'
+      +ef.map(function(m){ return '<option value="'+esc(m.rg)+'">'+esc(m.posto.split(' ')[0])+' '+esc(m.nome.split(' ')[0])+' &mdash; '+esc(m.rg)+'</option>'; }).join('')
+      +'</select></div>'
+      +'<div class="form-group"><label class="form-label">TIPO</label>'
+      +'<select id="aus-tipo" class="form-ctrl"><option>FERIAS</option><option>LTS</option><option>LTSPF</option><option>LIC.ESPECIAL</option></select></div></div>'
+      +'<div class="form-row">'
+      +'<div class="form-group"><label class="form-label">INICIO</label><input type="date" id="aus-ini" class="form-ctrl"></div>'
+      +'<div class="form-group"><label class="form-label">TERMINO</label><input type="date" id="aus-fim" class="form-ctrl"></div></div>'
+      +'<div class="form-group"><label class="form-label">OBSERVACAO (opcional)</label>'
+      +'<input id="aus-obs" class="form-ctrl" placeholder="Ex: Licenca medica, CRS..."></div>'
+      +'<button class="btn btn-primary" onclick="Render._salvarAus()">Registrar</button>'
+      +'</div>';
+    if(aus.length){
+      html += '<div class="tbl-wrap"><table><thead><tr><th>MILITAR</th><th>TIPO</th><th>PERIODO</th><th>STATUS</th><th></th></tr></thead><tbody>';
+      aus.forEach(function(a,idx){
+        var fim=new Date(a.fim); var diff=(fim-hoje)/86400000;
+        var status,scolor;
+        if(diff<0){status='ENCERRADO';scolor='#6B7280';}
+        else if(diff<=3){status='VENCE BREVE';scolor='#D97706';}
+        else{status='EM CURSO';scolor='#065F46';}
+        html+='<tr><td><div style="font-weight:700">'+esc(a.nome)+'</div><div style="font-size:10px;color:var(--muted)">RG '+esc(a.rg)+'</div></td>'
+          +'<td><span class="pill-sit" style="background:#0F2D5F">'+esc(a.tipo)+'</span></td>'
+          +'<td style="font-size:11px">'+esc(a.inicio)+'<br>ate '+esc(a.fim)+'</td>'
+          +'<td><span class="pill-sit" style="background:'+scolor+'">'+esc(status)+'</span>'
+          +(diff>=0&&diff<=3?'<br><span style="font-size:9px;color:#D97706;font-weight:700">'+Math.ceil(diff)+'d restantes</span>':'')+'</td>'
+          +'<td><button class="btn btn-danger btn-xs" onclick="Render._delAus('+idx+')">X</button></td></tr>';
+      });
+      html+='</tbody></table></div>';
+    } else {
+      html+='<div style="text-align:center;padding:30px;color:var(--muted)">Nenhuma ausencia registrada</div>';
+    }
+    document.getElementById('adm-c').innerHTML=html;
+  },
+  _salvarAus: function(){
+    var ef=DB.get('efetivo')||[];
+    var aus=DB.get('ausencias')||[];
+    var rg=document.getElementById('aus-rg').value;
+    var tipo=document.getElementById('aus-tipo').value;
+    var inicio=document.getElementById('aus-ini').value;
+    var fim=document.getElementById('aus-fim').value;
+    var obs=document.getElementById('aus-obs').value;
+    if(!rg||!tipo||!inicio||!fim){toast('Preencha inicio e termino!','error');return;}
+    var m=ef.find(function(x){return x.rg===rg;});
+    aus.push({rg:rg,nome:m?m.nome:rg,tipo:tipo,inicio:inicio,fim:fim,obs:obs,dt:new Date().toLocaleString('pt-BR')});
+    DB.set('ausencias',aus);
+    toast('Ausencia registrada!','success');
+    this._admAus();
+  },
+  _delAus: function(idx){
+    if(!confirm('Remover este registro de ausencia?')) return;
+    var aus=DB.get('ausencias')||[];
+    aus.splice(idx,1);
+    DB.set('ausencias',aus);
+    this._admAus();
+  },
+
   _admEf: function(){
     var ef=DB.get('efetivo')||[];
     var search=(DB.get('adSearch')||'').toLowerCase();
