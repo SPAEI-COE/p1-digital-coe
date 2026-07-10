@@ -1067,13 +1067,18 @@ var Nav = {
 
 // ── STAT CARD ─────────────────────────────────────────
 function statCard(ico, lbl, val, cor, sub, sitKey){
-  var extra = sitKey ? ' onclick="Render._abrirCardSit(\''+sitKey+'\')" style="cursor:pointer;user-select:none;transition:transform .1s" onmouseenter="this.style.transform=\'scale(1.03)\'" onmouseleave="this.style.transform=\'\'"' : '';
+  var extra = sitKey ? ' data-sit="'+sitKey+'" style="cursor:pointer;transition:transform .12s" onmouseenter="this.style.transform=\'scale(1.03)\'" onmouseleave="this.style.transform=\'\'"' : '';
   return '<div class="stat-card"'+extra+'><div class="stat-ico" style="background:'+cor+'22"><span style="font-size:20px">'+ico+'</span></div>'
     +'<div><div class="stat-val" style="color:'+cor+'">'+val+'</div>'
     +'<div class="stat-lbl">'+esc(lbl)+'</div>'
     +(sub?'<div class="stat-sub">'+esc(sub)+'</div>':'')
     +'</div></div>';
 }
+
+// Função global para o admin marcar o próprio dia — sem escaping complexo
+window._admDia = function(rg, idx, el){
+  Render._abrirSit(rg, idx, {target:el, stopPropagation:function(){}});
+};
 
 // ── RENDERIZADORES ────────────────────────────────────
 var Render = {
@@ -1124,10 +1129,18 @@ var Render = {
     }
 
     // ADMIN
+    // Contar usando allSt (escala da semana de hoje) para SERVIÇO/FOLGA/DISPENSA
+    // e situacaoAtual para afastamentos (FÉRIAS, LTS, etc.)
     var cnt = {SERVICO:0,FOLGA:0,DISPENSA:0,FERIAS:0,LTS:0,LTSPF:0,SOBREAVISO:0,SEM_FUNCAO:0,LUTO:0};
     ef.forEach(function(m){
-      var st = normSit(m.situacaoAtual || 'SERVICO');
-      if(cnt[st]!==undefined) cnt[st]++;
+      var sitAtual = normSit(m.situacaoAtual || 'SERVICO');
+      if(sitAtual !== 'SERVICO'){
+        if(cnt[sitAtual]!==undefined) cnt[sitAtual]++;
+      } else {
+        var st = todayIdx>=0 ? (allSt[m.rg]||[])[todayIdx]||'SERVICO' : 'SERVICO';
+        st = normSit(st);
+        if(cnt[st]!==undefined) cnt[st]++;
+      }
     });
     var html = '<div class="bv"><div class="bv-title">Dashboard &mdash; P1 COE/PMERJ</div>'
       +'<div class="bv-sub">'+esc(dataFmt)+'</div></div>';
@@ -1170,6 +1183,10 @@ var Render = {
     });
     html += '</div></div>';
     document.getElementById('s-dashboard').innerHTML = html;
+    // Anexar listeners nos cards clicáveis (data-sit)
+    document.querySelectorAll('#s-dashboard [data-sit]').forEach(function(el){
+      el.addEventListener('click', function(){ Render._abrirCardSit(this.getAttribute('data-sit')); });
+    });
   },
 
   // ESCALA DE FOLGAS
@@ -1236,7 +1253,7 @@ var Render = {
         +'<div style="font-size:9px;font-weight:700;color:var(--muted)">'+d.lbl+'</div>'
         +'<div style="font-size:12px;font-weight:800;color:var(--text);margin:3px 0">'+d.dt+'</div>'
         +'<span class="pill-sit" style="background:'+s.cor+';font-size:9px;cursor:'+(admPodeEditar?'pointer':'default')+'"'
-        +(admPodeEditar?' onclick="Render._toggleAdmin('+i+')"':'')+'>'+esc(s.label)+'</span>'
+        +(admPodeEditar?' data-rg="'+u.rg+'" data-dia="'+i+'" style="cursor:pointer"':'') + '>' + esc(s.label) + '</span>'
         +'</div>';
     });
     admPanelHtml += '</div><div style="display:flex;gap:8px;align-items:center">'
@@ -1312,8 +1329,8 @@ var Render = {
       var st = allSt[m.rg] || Array(7).fill('SERVICO');
       var env = Escala.isEnviado(m.rg);
       var isCMT = m.funcao==='CMT'||m.funcao==='SUBCMT';
-      html += '<tr style="'+(isCMT?'background:rgba(27,58,107,.07);outline:2px solid #1B3A6B;outline-offset:-2px;':'')+'">'
-        +'<td style="'+(isCMT?'border-left:4px solid #1B3A6B;':'')+'">'
+      html += '<tr style="'+(isCMT?'background:rgba(27,58,107,.08);box-shadow:inset 0 0 0 2px #1B3A6B;':'')+'">'
+        +'<td style="'+(isCMT?'border-left:4px solid var(--az);background:rgba(27,58,107,.05);padding-left:10px;':'')+'">'
         +'<div style="font-size:10px;color:var(--muted)">'+esc(m.posto)+' &mdash; '+esc(m.rg)+'</div>'
         +'<div style="font-weight:700">'+esc(m.nome)+(m.adido?' <span class="chip chip-gold">ADI</span>':'')+(isCMT?' <span class="chip" style="background:#1B3A6B;color:#fff;font-size:9px">'+esc(m.funcao)+'</span>':'')+'</div>'
         +'<div style="font-size:10px;color:var(--muted)">'+esc(m.funcao)+'</div></td>';
@@ -1326,6 +1343,15 @@ var Render = {
     html += '</tbody></table></div>';
     html += '<div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:right">'+lista.length+' de '+ef.length+' militares</div>';
     document.getElementById('s-folgas').innerHTML = html;
+    // Listener para cells do painel pessoal do admin (data-rg + data-dia)
+    document.querySelectorAll('#s-folgas [data-rg][data-dia]').forEach(function(el){
+      el.addEventListener('click', function(e){
+        var rg = this.getAttribute('data-rg');
+        var dia = parseInt(this.getAttribute('data-dia'));
+        Render._abrirSit(rg, dia, e);
+      });
+    });
+    // Listener para cards clicáveis do dashboard (caso chamado de folgas)
   },
 
   _toggleMembro: function(idx){
@@ -1397,19 +1423,29 @@ var Render = {
 
   _abrirCardSit: function(sit){
     var ef = DB.get('efetivo') || [];
+    var allSt = Escala.getAllStatus(ef);
+    var diasHoje = calcSemana(0);
+    var todayIdx = diasHoje.findIndex(function(d){ return d.hoje; });
     var s = SITUACOES[sit] || {cor:'#374151', label:sit};
-    var lista = ef.filter(function(m){ return normSit(m.situacaoAtual||'SERVICO')===sit; });
-    var html = '<div style="background:'+s.cor+';color:#fff;margin:-20px -20px 16px;padding:16px 20px;border-radius:12px 12px 0 0;font-size:16px;font-weight:800">'
-      +esc(s.label)+' &mdash; '+lista.length+' militar'+(lista.length!==1?'es':'')
+    var lista = ef.filter(function(m){
+      var sitAtual = normSit(m.situacaoAtual || 'SERVICO');
+      if(sitAtual !== 'SERVICO') return sitAtual === sit;
+      var todaySt = todayIdx>=0 ? normSit((allSt[m.rg]||[])[todayIdx]||'SERVICO') : 'SERVICO';
+      return todaySt === sit;
+    });
+    var s2 = SITUACOES[sit] || {cor:'#374151', label:sit};
+    var html = '<div style="background:'+s2.cor+';color:#fff;margin:-20px -20px 16px;padding:16px 20px;border-radius:12px 12px 0 0;font-size:16px;font-weight:800">'
+      +esc(s2.label)+' &mdash; '+lista.length+' militar'+(lista.length!==1?'es':'')
       +'</div><button class="modal-close" onclick="Modal.close()">&#x2715;</button>';
     if(!lista.length){
-      html += '<div style="text-align:center;padding:30px;color:var(--muted);font-size:14px">Nenhum militar nesta situacao</div>';
+      html += '<div style="text-align:center;padding:30px;color:var(--muted);font-size:14px">Nenhum militar nesta situacao hoje</div>';
     } else {
       html += '<div class="tbl-wrap" style="max-height:55vh;overflow-y:auto"><table><thead><tr><th>RG</th><th>NOME</th><th>POSTO</th><th>FUNCAO</th></tr></thead><tbody>';
       lista.forEach(function(m){
-        var isCMT = m.funcao==='CMT';
-        html += '<tr'+(isCMT?' style="background:rgba(27,58,107,.08)"':'')+'><td style="font-family:monospace;font-size:11px">'+esc(m.rg)+'</td>'
-          +'<td style="font-weight:700">'+esc(m.nome)+(isCMT?' <span class="chip" style="background:#1B3A6B;color:#fff">CMT</span>':'')+'</td>'
+        var isCMT = m.funcao==='CMT'||m.funcao==='SUBCMT';
+        html += '<tr'+(isCMT?' style="background:rgba(27,58,107,.12);box-shadow:inset 3px 0 0 #1B3A6B"':'')+'>'
+          +'<td style="font-family:monospace;font-size:11px">'+esc(m.rg)+'</td>'
+          +'<td style="font-weight:700">'+esc(m.nome)+(isCMT?' <span class="chip" style="background:#1B3A6B;color:#fff">'+esc(m.funcao)+'</span>':'')+'</td>'
           +'<td style="font-size:11px">'+esc(m.posto)+'</td>'
           +'<td style="font-size:11px;color:var(--muted)">'+esc(m.funcao)+'</td></tr>';
       });
@@ -1459,8 +1495,8 @@ var Render = {
       var sit = normSit(m.situacaoAtual||'SERVICO');
       var s = SITUACOES[sit] || {cor:'#374151', label:sit};
       var isCMT = m.funcao==='CMT'||m.funcao==='SUBCMT';
-      html += '<tr style="'+(isCMT?'background:rgba(27,58,107,.07);':'')+'">'
-        +'<td style="'+(isCMT?'border-left:4px solid #1B3A6B;':'')+'">'
+      html += '<tr style="'+(isCMT?'background:rgba(27,58,107,.08);box-shadow:inset 0 0 0 2px #1B3A6B;':'')+'">'
+        +'<td style="'+(isCMT?'border-left:4px solid var(--az);background:rgba(27,58,107,.05);padding-left:10px;':'')+'">'
         +'<div style="font-size:10px;color:var(--muted)">'+esc(m.posto)+' &middot; RG '+esc(m.rg)+'</div>'
         +'<div style="font-weight:700">'+esc(m.nome)+(m.adido?' <span class="chip chip-gold">ADI</span>':'')+(isCMT?' <span class="chip" style="background:#1B3A6B;color:#fff;font-size:9px">'+esc(m.funcao)+'</span>':'')+'</div></td>'
         +'<td style="font-size:11px;color:var(--muted)">'+esc(m.funcao)+'</td>'
@@ -1717,14 +1753,34 @@ var Render = {
     var m=ef.find(function(x){return x.rg===rg;});
     aus.push({rg:rg,nome:m?m.nome:rg,tipo:tipo,inicio:inicio,fim:fim,obs:obs,dt:new Date().toLocaleString('pt-BR')});
     DB.set('ausencias',aus);
-    toast('Ausencia registrada!','success');
+    // Atualizar situacaoAtual do militar
+    var sitMap = {'FERIAS':'FERIAS','LTS':'LTS','LTSPF':'LTSPF','LIC.ESPECIAL':'FERIAS','SOBREAVISO':'SOBREAVISO'};
+    var novaSit = sitMap[tipo] || 'FERIAS';
+    var efArr = DB.get('efetivo') || [];
+    var mIdx = efArr.findIndex(function(x){ return x.rg===rg; });
+    if(mIdx>=0){ efArr[mIdx].situacaoAtual = novaSit; DB.set('efetivo', efArr); }
+    toast('Ausencia registrada e situacao atualizada!','success');
     this._admAus();
   },
   _delAus: function(idx){
     if(!confirm('Remover este registro de ausencia?')) return;
     var aus=DB.get('ausencias')||[];
-    aus.splice(idx,1);
+    var removed = aus.splice(idx,1)[0];
     DB.set('ausencias',aus);
+    // Verificar se o militar tem outra ausência ativa; se não, resetar
+    if(removed && removed.rg){
+      var restantes = aus.filter(function(a){
+        return a.rg===removed.rg && (new Date(a.fim)-new Date())>=0;
+      });
+      if(!restantes.length){
+        var efArr2 = DB.get('efetivo') || [];
+        var mIdx2 = efArr2.findIndex(function(x){ return x.rg===removed.rg; });
+        if(mIdx2>=0){ efArr2[mIdx2].situacaoAtual='SERVICO'; DB.set('efetivo',efArr2); }
+        toast('Ausencia removida — situacao resetada para SERVICO','success');
+      } else {
+        toast('Ausencia removida','success');
+      }
+    }
     this._admAus();
   },
 
