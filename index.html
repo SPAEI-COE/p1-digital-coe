@@ -271,17 +271,14 @@ textarea.form-ctrl{resize:vertical;min-height:80px}
   .stat-grid{grid-template-columns:repeat(2,1fr)}
   .mini-cal{gap:3px}
 }
+
+/* SYNC PILL */
+#sync-pill{position:fixed;bottom:14px;right:14px;z-index:9990;padding:5px 12px;border-radius:20px;font-size:10px;font-weight:800;letter-spacing:1px;box-shadow:0 3px 12px rgba(0,0,0,.3);transition:all .3s;pointer-events:none;display:none}
+#sync-pill.offline{display:block;background:#374151;color:#9CA3AF}
+#sync-pill.syncing{display:block;background:#1D4ED8;color:#fff}
+#sync-pill.online{display:block;background:#065F46;color:#6EE7B7}
 </style>
 
-<!-- Firebase SDK v5.0 -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-<style>
-#sync-pill{position:fixed;bottom:14px;right:14px;z-index:9990;padding:5px 12px;border-radius:20px;font-size:10px;font-weight:800;letter-spacing:1px;box-shadow:0 3px 12px rgba(0,0,0,.3);transition:all .3s;pointer-events:none}
-#sync-pill.offline{background:#374151;color:#9CA3AF}
-#sync-pill.syncing{background:#1D4ED8;color:#fff}
-#sync-pill.online{background:#065F46;color:#6EE7B7}
-</style>
 </head>
 <body>
 
@@ -739,84 +736,88 @@ function pillSit(rawSit) {
 }
 
 // ── BANCO DE DADOS ─────────────────────────────────────
-// ── FIREBASE + DB (v5.0) ─────────────────────────────
-const _FB_CFG = {
-  apiKey: "AIzaSyD7jmRxODElRmpvVl8N6C8LUrNzTc-Ke7Q",
-  authDomain: "spaei-digital-coe.firebaseapp.com",
-  databaseURL: "https://spaei-digital-coe-default-rtdb.firebaseio.com",
-  projectId: "spaei-digital-coe",
-  storageBucket: "spaei-digital-coe.firebasestorage.app",
-  messagingSenderId: "441045974967",
-  appId: "1:441045974967:web:4c3e685b0ca218cb363232"
-};
-var _fbApp, _fbDB, _fbRef;
-var _fbReady = false;
-var _syncTimer = null;
-var _fbCache  = {};           // cache em memória (fonte de verdade)
-var _lsKey    = 'p1coe_';    // prefixo localStorage (fallback)
+// ── FIREBASE + DB (v5.0 — carregamento dinâmico) ────────────────────────────
+var _fbCache  = {};
+var _fbReady  = false;
+var _fbDB, _fbRef, _syncTimer;
 
-function _syncPill(state){
+var FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyD7jmRxODElRmpvVl8N6C8LUrNzTc-Ke7Q",
+  authDomain:        "spaei-digital-coe.firebaseapp.com",
+  databaseURL:       "https://spaei-digital-coe-default-rtdb.firebaseio.com",
+  projectId:         "spaei-digital-coe",
+  storageBucket:     "spaei-digital-coe.firebasestorage.app",
+  messagingSenderId: "441045974967",
+  appId:             "1:441045974967:web:4c3e685b0ca218cb363232"
+};
+
+function _syncPill(state, txt){
   var p = document.getElementById('sync-pill');
   if(!p) return;
-  p.className = 'sync-pill ' + state;
-  p.textContent = state === 'offline' ? '⚡ OFFLINE' : state === 'syncing' ? '↑ SINCRONIZANDO' : '✓ FIREBASE';
+  p.className = state;
+  p.textContent = txt;
 }
-function _pillOnline(){ _syncPill('online'); }
-function _pillOffline(){ _syncPill('offline'); }
-function _pillSyncing(){ _syncPill('syncing'); }
 
-try {
-  if (!firebase.apps.length) {
-    _fbApp = firebase.initializeApp(_FB_CFG);
-  } else {
-    _fbApp = firebase.app();
-  }
-  _fbDB  = firebase.database(_fbApp);
-  _fbRef = _fbDB.ref('/p1digital');
-  _fbRef.on('value', function(snap){
-    var data = snap.val();
-    if(data){
+function _initFirebase(){
+  try {
+    if(typeof firebase === 'undefined') throw new Error('SDK ausente');
+    if(!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    _fbDB  = firebase.database();
+    _fbRef = _fbDB.ref('/p1digital');
+    _fbRef.on('value', function(snap){
+      var data = snap.val() || {};
       Object.keys(data).forEach(function(k){ _fbCache[k] = data[k]; });
-    }
-    _fbReady = true;
-    _pillOnline();
-    // Atualizar UI se já logado
-    if(typeof Auth !== 'undefined' && Auth.user && typeof Render !== 'undefined'){
-      if(Nav && Nav.current) try{ Render[Nav.current](); }catch(e){}
-      if(typeof buildNav === 'function') buildNav();
-    }
-  }, function(){ _pillOffline(); });
-  _fbReady = false;
-} catch(e) {
-  console.warn('Firebase init error:', e);
-  _fbReady = false;
-  setTimeout(function(){ _pillOffline(); }, 500);
+      _fbReady = true;
+      _syncPill('online', '✓ FIREBASE');
+      if(typeof Auth !== 'undefined' && Auth.user && typeof Nav !== 'undefined' && Nav.current){
+        try { Render[Nav.current](); } catch(e){}
+        if(typeof buildNav === 'function') buildNav();
+      }
+    }, function(){ _syncPill('offline', '⚡ OFFLINE'); });
+  } catch(e) {
+    console.warn('Firebase init error:', e.message);
+    _syncPill('offline', '⚡ OFFLINE');
+  }
 }
+
+// Carregamento dinâmico do SDK Firebase (garante ordem de execução)
+(function(){
+  var BASE = 'https://www.gstatic.com/firebasejs/10.12.2/';
+  function loadScript(url, next){
+    var s = document.createElement('script');
+    s.src = url;
+    s.onload = next;
+    s.onerror = function(){ _syncPill('offline', '⚡ OFFLINE'); console.warn('Erro ao carregar Firebase SDK:', url); };
+    document.head.appendChild(s);
+  }
+  _syncPill('syncing', '↑ CONECTANDO');
+  loadScript(BASE + 'firebase-app-compat.js', function(){
+    loadScript(BASE + 'firebase-database-compat.js', function(){
+      _initFirebase();
+    });
+  });
+})();
 
 var DB = {
-  _k: _lsKey,
+  _k: 'p1coe_',
   get: function(k){
-    // Cache em memória primeiro; fallback localStorage
     if(_fbCache.hasOwnProperty(k)) return _fbCache[k];
     try{ var v=localStorage.getItem(this._k+k); return v?JSON.parse(v):null; }
     catch(e){ return null; }
   },
   set: function(k, v){
-    // Atualizar cache imediatamente
     _fbCache[k] = v;
-    // Salvar localStorage como fallback
     try{ localStorage.setItem(this._k+k, JSON.stringify(v)); } catch(e){}
-    // Debounce do envio ao Firebase
     if(_syncTimer) clearTimeout(_syncTimer);
-    _pillSyncing();
+    _syncPill('syncing', '↑ ENVIANDO');
     _syncTimer = setTimeout(function(){
-      if(_fbRef && _fbReady !== false){
+      if(_fbRef && _fbReady){
         var upd = {}; upd[k] = v;
         _fbRef.update(upd)
-          .then(_pillOnline)
-          .catch(function(){ _pillOffline(); });
+          .then(function(){ _syncPill('online', '✓ FIREBASE'); })
+          .catch(function(){ _syncPill('offline', '⚡ OFFLINE'); });
       } else {
-        _pillOffline();
+        _syncPill('offline', '⚡ OFFLINE');
       }
     }, 400);
     return true;
@@ -850,7 +851,6 @@ var DB = {
     if(changed) this.set('efetivo', ef);
   }
 };
-
 // ── UTILITÁRIOS ────────────────────────────────────────
 function esc(v){ return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
@@ -1991,7 +1991,7 @@ var Render = {
     if(!confirm('ATENCAO: Apagar TODOS os dados? Esta acao e irreversivel.')) return;
     if(!confirm('Confirmar reset total?')) return;
     for(var k in localStorage){ if(k.startsWith('p1coe_')) localStorage.removeItem(k); }
-    _fbCache = {};
+    _fbCache = {}; _fbReady = false;
     if(_fbRef){ _fbRef.set(null).catch(function(){}); }
     DB.init(); toast('Sistema resetado.','warning');
     setTimeout(function(){ location.reload(); }, 600);
@@ -2036,7 +2036,6 @@ document.addEventListener('click', function(){
 });
 
 </script>
-
-<div id="sync-pill" class="sync-pill offline">⚡ OFFLINE</div>
+<div id="sync-pill"></div>
 </body>
 </html>
