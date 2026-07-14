@@ -852,11 +852,28 @@ function _initFirebase(){
     if(!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     _fbDB  = firebase.database();
     _fbRef = _fbDB.ref('/p1digital');
+
+    // ── Listener oficial de status de rede (único mecanismo confiável do Firebase) ──
+    _fbDB.ref('.info/connected').on('value', function(snap){
+      if(snap.val() === true){
+        _fbReady = true;
+        _syncPill('online', '✓ FIREBASE');
+        var ob = document.getElementById('offline-bar');
+        if(ob) ob.classList.remove('show');
+      } else {
+        _fbReady = false;
+        _syncPill('offline', '⚡ OFFLINE');
+        var ob2 = document.getElementById('offline-bar');
+        if(ob2 && document.getElementById('main-app') && document.getElementById('main-app').classList.contains('visible')){
+          ob2.classList.add('show');
+          setTimeout(function(){ ob2.classList.remove('show'); }, 5000);
+        }
+      }
+    });
+
     _fbRef.on('value', function(snap){
       var data = snap.val() || {};
       Object.keys(data).forEach(function(k){ _fbCache[k] = data[k]; });
-      _fbReady = true;
-      _syncPill('online', '✓ FIREBASE');
       // Se Firebase tem dados reais (_init=true), atualizar localStorage com eles
       if(_fbCache['_init']){
         try{ localStorage.setItem('p1coe__init', JSON.stringify(true)); }catch(e){}
@@ -865,7 +882,7 @@ function _initFirebase(){
         try { Render[Nav.current](); } catch(e){}
         if(typeof buildNav === 'function') buildNav();
       }
-    }, function(){ _syncPill('offline', '⚡ OFFLINE'); });
+    }, function(e){ console.warn('Firebase onValue error:', e); });
   } catch(e) {
     console.warn('Firebase init error:', e.message);
     _syncPill('offline', '⚡ OFFLINE');
@@ -916,7 +933,7 @@ var DB = {
     _fbCache[k] = v;
     try{ localStorage.setItem(this._k+k, JSON.stringify(v)); } catch(e){}
     if(_syncTimer) clearTimeout(_syncTimer);
-    _syncPill('syncing', '↑ ENVIANDO');
+    if(_fbReady) _syncPill('syncing', '↑ ENVIANDO');
     _syncTimer = setTimeout(function(){
       if(_fbRef && _fbReady){
         var upd = {}; upd[k] = v;
@@ -1119,10 +1136,10 @@ var Auth = {
     btn.disabled = true;
     document.getElementById('l-ico').innerHTML = '<span class="spin">&#8987;</span>';
     // ── AGUARDAR FIREBASE (com fallback offline) ──────────────────────────────
-    // Aguarda até 4s por Firebase. Se não conectar, usa localStorage como fallback.
+    // Aguarda até 8s por Firebase. Se não conectar, usa localStorage como fallback.
     if(!_fbReady){
       var fbWait = new Promise(function(resolve){
-        var t = setTimeout(function(){ resolve(false); }, 4000);
+        var t = setTimeout(function(){ resolve(false); }, 8000);
         var i = setInterval(function(){
           if(_fbReady){ clearInterval(i); clearTimeout(t); resolve(true); }
         }, 100);
