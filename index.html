@@ -964,6 +964,14 @@ function _initFirebase(){
     if(!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     _fbDB  = firebase.database();
     _fbRef = _fbDB.ref('/p1digital');
+    // Ponte somente-leitura com o SPAEI DIGITAL: NUNCA escreve em /spaei.
+    // Quem marca Folga/Dispensa no SPAEI não precisa repetir no P1.
+    _fbDB.ref('/spaei').on('value', function(snap){
+      _spaeiCache = snap.val() || {};
+      if(typeof Auth !== 'undefined' && Auth.user && typeof Nav !== 'undefined' && Nav.current){
+        try { Render[Nav.current](); } catch(e){}
+      }
+    }, function(){ /* offline: bridge fica com o último valor em cache */ });
     _fbRef.on('value', function(snap){
       var data = snap.val() || {};
       Object.keys(data).forEach(function(k){ _fbCache[k] = data[k]; });
@@ -1187,34 +1195,89 @@ function labelPrazo(){
 }
 
 // ── ESCALA ────────────────────────────────────────────
+// ── PONTE SPAEI DIGITAL → P1 DIGITAL (somente leitura) ──────────────────
+// Fluxo UNIDIRECIONAL: lemos /spaei/efetivo e /spaei/escalaSemanas; nunca
+// escrevemos lá. Só FOLGA e DISPENSA atravessam a ponte — FÉRIAS, LTS,
+// LICENÇA, LUTO e demais afastamentos continuam domínio exclusivo do
+// ADM do P1. Uma edição manual do ADM no P1 trava (spaeiLock) aquele dia
+// específico, que passa a ter precedência sobre o feed do SPAEI, até o
+// ADM optar por "🔗 Seguir SPAEI" novamente.
+var _spaeiCache = {};
+var SpaeiBridge = {
+  _rgsCache: null,
+  rgsVinculados: function(){
+    return (_spaeiCache.efetivo || []).map(function(m){ return m.rg; });
+  },
+  isVinculado: function(rg){
+    return this.rgsVinculados().indexOf(rg) !== -1;
+  },
+  situacaoDoDia: function(rg, diaIdx){
+    var semanas = _spaeiCache.escalaSemanas || {};
+    var arr = (semanas[getSemanaKey()] || {})[rg];
+    if(!arr) return null;
+    var v = arr[diaIdx];
+    return (v==='FOLGA'||v==='DISPENSA') ? v : null;
+  },
+  isLocked: function(rg, diaIdx){
+    var locks = DB.get('spaeiLock') || {};
+    return !!(((locks[getSemanaKey()]||{})[rg]||{})[diaIdx]);
+  },
+  lock: function(rg, diaIdx){
+    var locks = DB.get('spaeiLock') || {};
+    var key = getSemanaKey();
+    if(!locks[key]) locks[key] = {};
+    if(!locks[key][rg]) locks[key][rg] = {};
+    locks[key][rg][diaIdx] = true;
+    DB.set('spaeiLock', locks);
+  },
+  unlock: function(rg, diaIdx){
+    var locks = DB.get('spaeiLock') || {};
+    var key = getSemanaKey();
+    if(locks[key] && locks[key][rg]) delete locks[key][rg][diaIdx];
+    DB.set('spaeiLock', locks);
+  },
+  // Retorna {css, tag} para marcar visualmente uma célula herdada do SPAEI
+  marca: function(rg, diaIdx){
+    if(!this.isVinculado(rg) || this.isLocked(rg,diaIdx) || !this.situacaoDoDia(rg,diaIdx))
+      return {css:'', tag:''};
+    return {css:'box-shadow:inset 0 0 0 2px #00CFFF;', tag:' 🔗'};
+  }
+};
+
 var Escala = {
-  getSemana: function(rg){
+  getSemanaBase: function(rg){
     var key = getSemanaKey();
     var semanas = DB.get('escalaSemanas') || {};
     if(semanas[key] && semanas[key][rg]) return semanas[key][rg];
     var ref = DB.get('escalaRef') || {};
     return ref[rg] || Array(7).fill('SERVICO');
   },
+  getSemana: function(rg){
+    var base = this.getSemanaBase(rg).slice();
+    if(SpaeiBridge.isVinculado(rg)){
+      for(var i=0;i<7;i++){
+        if(SpaeiBridge.isLocked(rg,i)) continue;
+        var v = SpaeiBridge.situacaoDoDia(rg,i);
+        if(v) base[i] = v;
+      }
+    }
+    return base;
+  },
   getAllStatus: function(ef){
-    var key = getSemanaKey();
-    var semanas = DB.get('escalaSemanas') || {};
-    var semana = semanas[key];
-    var ref = DB.get('escalaRef') || {};
+    var self = this;
     var resultado = {};
-    ef.forEach(function(m){
-      if(semana && semana[m.rg]) resultado[m.rg] = semana[m.rg];
-      else if(ref[m.rg]) resultado[m.rg] = ref[m.rg];
-      else resultado[m.rg] = Array(7).fill('SERVICO');
-    });
+    ef.forEach(function(m){ resultado[m.rg] = self.getSemana(m.rg); });
     return resultado;
   },
   setSit: function(rg, diaIdx, sit){
     var key = getSemanaKey();
     var semanas = DB.get('escalaSemanas') || {};
     if(!semanas[key]) semanas[key] = {};
-    if(!semanas[key][rg]) semanas[key][rg] = this.getSemana(rg).slice();
+    if(!semanas[key][rg]) semanas[key][rg] = this.getSemanaBase(rg).slice();
     semanas[key][rg][diaIdx] = sit;
     DB.set('escalaSemanas', semanas);
+    // Edição manual do ADM sempre trava a precedência sobre o SPAEI
+    if(SpaeiBridge.isVinculado(rg)) SpaeiBridge.lock(rg, diaIdx);
     var logs = DB.get('logs') || [];
     var u = Auth.user;
     logs.unshift({dt:fmtDataHoraBSB(),
@@ -1853,13 +1916,14 @@ var Render = {
         var st = meusSt[i] || 'SERVICO';
         var s = SITUACOES[st] || {cor:'#374151', label:st};
         var podeAlt = podeEditar && (st==='SERVICO'||st==='FOLGA'||st==='DISPENSA');
+        var mk = SpaeiBridge.marca(u.rg,i);
         html += '<div style="text-align:center;padding:10px 4px;border-radius:11px;border:2px solid '
           +(d.hoje?'rgba(201,150,10,.5)':'var(--border)')
           +';background:'+(d.hoje?'rgba(201,150,10,.05)':'var(--hover)')+'\">'
           +'<div style="font-size:9px;font-weight:700;color:var(--muted)">'+d.lbl+'</div>'
           +'<div style="font-size:12px;font-weight:800;color:var(--text);margin:4px 0">'+d.dt+'</div>'
-          +'<span class="pill-sit" style="background:'+s.cor+';font-size:9px;cursor:'+(podeAlt?'pointer':'default')+'\"'
-          +(podeAlt?' onclick="Render._toggleMembro('+i+')"':'')+'>'+esc(s.label)+'</span>'
+          +'<span class="pill-sit" style="background:'+s.cor+';font-size:9px;'+mk.css+'cursor:'+(podeAlt?'pointer':'default')+'\"'
+          +(podeAlt?' onclick="Render._toggleMembro('+i+')"':'')+'>'+esc(s.label)+mk.tag+'</span>'
           +'</div>';
       });
       html += '</div>';
@@ -1885,11 +1949,12 @@ var Render = {
     DIAS.forEach(function(d,i){
       var st = admSt[i] || 'SERVICO';
       var s = SITUACOES[st] || {cor:'#374151', label:st};
+      var mk = SpaeiBridge.marca(u.rg,i);
       admPanelHtml += '<div style="text-align:center;padding:8px 4px;border-radius:10px;border:2px solid '+(d.hoje?'rgba(201,150,10,.5)':'var(--border)')+';background:'+(d.hoje?'rgba(201,150,10,.05)':'var(--hover)')+'\">'
         +'<div style="font-size:9px;font-weight:700;color:var(--muted)">'+d.lbl+'</div>'
         +'<div style="font-size:12px;font-weight:800;color:var(--text);margin:3px 0">'+d.dt+'</div>'
-        +'<span class="pill-sit" style="background:'+s.cor+';font-size:9px;cursor:'+(admPodeEditar?'pointer':'default')+'"'
-        +(admPodeEditar?' data-rg="'+u.rg+'" data-dia="'+i+'" style="cursor:pointer"':'') + '>' + esc(s.label) + '</span>'
+        +'<span class="pill-sit" style="background:'+s.cor+';font-size:9px;'+mk.css+'cursor:'+(admPodeEditar?'pointer':'default')+'"'
+        +(admPodeEditar?' data-rg="'+u.rg+'" data-dia="'+i+'" style="cursor:pointer"':'') + '>' + esc(s.label) + mk.tag + '</span>'
         +'</div>';
     });
     admPanelHtml += '</div><div style="display:flex;gap:8px;align-items:center">'
@@ -1933,7 +1998,8 @@ var Render = {
       +funcoes.map(function(f){ return '<option value="'+esc(f)+'"'+(filtroFuncao===f?' selected':'')+'>'+esc(f)+'</option>'; }).join('')
       +'</select>'
       +'<button class="btn btn-ghost btn-sm" onclick="_memState.escSearch=\'\';_memState.filtroFuncao=\'\';Render.folgas()">Limpar</button>'
-      +'</div>';
+      +'</div>'
+      +'<div style="font-size:10px;color:var(--muted);margin-top:4px">🔗 = dia marcado automaticamente pelo SPAEI DIGITAL. Clique na célula e escolha outra situação para travar a edição manual, ou "Seguir SPAEI" para destravar.</div>';
 
     // Mini calendário
     html += '<div class="mini-cal">';
@@ -1972,7 +2038,8 @@ var Render = {
         +'<div style="font-size:10px;color:var(--muted)">'+esc(m.funcao)+'</div></td>';
       st.slice(0,7).forEach(function(s,i){
         var cfg = SITUACOES[s] || {cor:'#374151', label:s};
-        html += '<td><span class="pill-sit" style="background:'+cfg.cor+';min-width:72px;display:inline-flex;justify-content:center;cursor:pointer;font-size:9px" onclick="Render._abrirSit(\''+esc(m.rg)+'\','+i+',event)">'+esc(cfg.label)+'</span></td>';
+        var mk = SpaeiBridge.marca(m.rg,i);
+        html += '<td><span class="pill-sit" style="background:'+cfg.cor+';min-width:72px;display:inline-flex;justify-content:center;cursor:pointer;font-size:9px;'+mk.css+'" onclick="Render._abrirSit(\''+esc(m.rg)+'\','+i+',event)" title="'+(mk.tag?'Herdado do SPAEI DIGITAL':'')+'">'+esc(cfg.label)+mk.tag+'</span></td>';
       });
       html += '<td>'+(env?'<button class="btn btn-ghost btn-xs" onclick="Escala.desbloquear(\''+esc(m.rg)+'\');Render.folgas();toast(\'Desbloqueado\',\'success\')">Desbloq</button>':'')+'</td></tr>';
     });
@@ -2032,13 +2099,19 @@ var Render = {
     dd.innerHTML = Object.keys(SITUACOES).map(function(k){
       var s = SITUACOES[k];
       return '<div style="padding:7px 11px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;background:'+s.cor+';color:#fff;margin-bottom:3px" onclick="Render._setSit(\''+rg+'\','+diaIdx+',\''+k+'\');document.getElementById(\'drop-sit\').style.display=\'none\'">'+esc(s.label)+'</div>';
-    }).join('');
+    }).join('') + (SpaeiBridge.isVinculado(rg) && SpaeiBridge.isLocked(rg,diaIdx) ?
+      '<div style="padding:7px 11px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;background:#00CFFF;color:#04202B;margin-top:3px" onclick="Render._seguirSpaei(\''+rg+'\','+diaIdx+');document.getElementById(\'drop-sit\').style.display=\'none\'">🔗 Seguir SPAEI</div>' : '');
     var rect = evt.target.getBoundingClientRect();
     dd.style.display='block';
     dd.style.top=Math.min(rect.bottom+4, window.innerHeight-320)+'px';
     dd.style.left=Math.max(rect.left-40,8)+'px';
     var close=function(){ dd.style.display='none'; document.removeEventListener('click',close); };
     setTimeout(function(){ document.addEventListener('click',close); }, 50);
+  },
+  _seguirSpaei: function(rg, diaIdx){
+    SpaeiBridge.unlock(rg, diaIdx);
+    this.folgas();
+    toast('Dia voltou a seguir o SPAEI DIGITAL', 'success');
   },
   _setSit: function(rg, diaIdx, sit){
     Escala.setSit(rg, diaIdx, sit);
