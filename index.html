@@ -872,7 +872,7 @@ const SIT_MAP = {
 
 // ── DISTRIBUIÇÃO DO EFETIVO — repartições derivadas de m.funcao ──────
 // Ordem das repartições exibidas nos sub-cards.
-const REPARTICOES = ['CMT','SUBCMT','P1','P2','P3','P4','P5','AJD','PROJETOS','DEMOLIÇÃO','BLINDADOS','OBRAS','RUMB','NAOE','ALMOXARIFADO','APOIO/DIVERSOS'];
+const REPARTICOES = ['CMT','SUBCMT','PROJETOS','P1','CONFERÊNCIA','FISCAL DE DIA','P2','P3','P4','ALMOXARIFADO','FAXINA','OBRAS','RUMB','SMT','TELEMÁTICA','P5','AJD','SECRETARIA','TESOURARIA','NAOE','DEMOLIÇÃO','BLINDADOS','AGENTE DE TRANSLADO','APOIO/DIVERSOS'];
 const REP_META = {
   'CMT':{cor:'#1B3A6B',ico:'star'},          'SUBCMT':{cor:'#274C86',ico:'shield'},
   'P1':{cor:'var(--az)',ico:'users'},          'P2':{cor:'#155E75',ico:'map'},
@@ -881,7 +881,11 @@ const REP_META = {
   'PROJETOS':{cor:'#7C3AED',ico:'drafting-compass'}, 'DEMOLIÇÃO':{cor:'#B45309',ico:'bomb'},
   'BLINDADOS':{cor:'#334155',ico:'truck'},   'OBRAS':{cor:'#9A3412',ico:'hard-hat'},
   'RUMB':{cor:'#0369A1',ico:'radio'},        'NAOE':{cor:'#1E40AF',ico:'anchor'},
-  'ALMOXARIFADO':{cor:'#4D7C0F',ico:'boxes'},'APOIO/DIVERSOS':{cor:'#64748B',ico:'wrench'}
+  'ALMOXARIFADO':{cor:'#4D7C0F',ico:'boxes'},'APOIO/DIVERSOS':{cor:'#64748B',ico:'wrench'},
+  'CONFERÊNCIA':{cor:'#0F766E',ico:'check-check'}, 'FISCAL DE DIA':{cor:'#B91C1C',ico:'shield-alert'},
+  'FAXINA':{cor:'#CA8A04',ico:'sparkles'},   'SMT':{cor:'#4338CA',ico:'settings'},
+  'TELEMÁTICA':{cor:'#BE185D',ico:'radio-tower'}, 'SECRETARIA':{cor:'#57534E',ico:'file-text'},
+  'TESOURARIA':{cor:'#B08900',ico:'wallet'}, 'AGENTE DE TRANSLADO':{cor:'#78716C',ico:'car'}
 };
 // Normaliza função: remove acentos, colapsa espaços e barras -> maiúsculas.
 function _normFunc(f){
@@ -892,11 +896,14 @@ function _normFunc(f){
 function reparticaoDe(funcao){
   var n = _normFunc(funcao);                       // ex.: "CHEFE P 3", "DEM ALA A"
   if(/\bSUBCMT\b/.test(n)) return 'SUBCMT';
-  if(/\bMOT CMT\b/.test(n)) return 'APOIO/DIVERSOS';
+  if(/\bMOT CMT\b/.test(n) || /CONDUTOR EXP/.test(n)) return 'AGENTE DE TRANSLADO';
   if(/\bCMT\b/.test(n)) return 'CMT';
+  if(/CONFERENTE/.test(n)) return 'CONFERÊNCIA';
+  if(/FISCAL/.test(n)) return 'FISCAL DE DIA';
   if(/\bP\s*1\b/.test(n)) return 'P1';
   if(/\bP\s*2\b/.test(n)) return 'P2';
   if(/\bP\s*3\b/.test(n)) return 'P3';
+  if(/TESOUR|TESOR/.test(n)) return 'TESOURARIA';
   if(/\bP\s*4\b/.test(n)) return 'P4';
   // RUMB/NAOE/ALMOX têm prioridade sobre P5 em chefias combinadas
   // (ex.: "CHEFE RUMB/P5/SEC" pertence a RUMB, não a P5).
@@ -909,6 +916,10 @@ function reparticaoDe(funcao){
   if(/^DEM/.test(n) || /DEMOL/.test(n)) return 'DEMOLIÇÃO';
   if(/^BLIN/.test(n)) return 'BLINDADOS';
   if(/OBRA/.test(n)) return 'OBRAS';
+  if(/FAXINA/.test(n)) return 'FAXINA';
+  if(/SECRETARIA/.test(n)) return 'SECRETARIA';
+  if(/TELEMATICA/.test(n)) return 'TELEMÁTICA';
+  if(/\bSMT\b/.test(n)) return 'SMT';
   return 'APOIO/DIVERSOS';
 }
 // Agrupa o efetivo por repartição -> {rep: [militares]}
